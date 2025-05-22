@@ -2,42 +2,45 @@
 #include "nn_utils/nn_exception.h"
 
 NeuralNetwork::NeuralNetwork(float learning_rate) :
-	learning_rate(learning_rate)
-{ }
+    learning_rate(learning_rate), bce_cost()
+{
+    // Initialize Y and dY without allocating memory yet
+    Y = Matrix();
+    dY = Matrix();
+}
 
 NeuralNetwork::~NeuralNetwork() {
-	for (auto layer : layers) {
-		delete layer;
-	}
+    for (auto layer : layers) {
+        delete layer;
+    }
 }
 
 void NeuralNetwork::addLayer(NNLayer* layer) {
-	this->layers.push_back(layer);
+    this->layers.push_back(layer);
 }
 
-//Task: Call forward on each layer
+// Task: Call forward on each layer
 Matrix NeuralNetwork::forward(Matrix X)
 {
-	Matrix Z = X;
+    Matrix Z = X;
 
-	for(auto layer : layers)
+    for (auto layer : layers)
     {
-	    Z = layer->forward(Z);
+        Z = layer->forward(Z);
     }
 
-	Y = Z;
-	
-	return Y;
+    Y = Z;
+    
+    return Y;
 }
 
-
-//Task: Apply backpropagation
+// Task: Apply backpropagation
 void NeuralNetwork::backprop(Matrix predictions, Matrix target)
 {
     dY.allocateMemoryIfNotAllocated(predictions.shape);
     Matrix error = bce_cost.dCost(predictions, target, dY);
 
-    for(auto it = this->layers.rbegin(); it != this->layers.rend(); it++)
+    for (auto it = this->layers.rbegin(); it != this->layers.rend(); it++)
     {
         error = (*it)->backprop(error, learning_rate);
     }
@@ -46,5 +49,5 @@ void NeuralNetwork::backprop(Matrix predictions, Matrix target)
 }
 
 std::vector<NNLayer*> NeuralNetwork::getLayers() const {
-	return layers;
+    return layers;
 }

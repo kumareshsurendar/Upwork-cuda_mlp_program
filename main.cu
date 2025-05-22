@@ -60,11 +60,12 @@ float computeAccuracy(const Matrix& predictions, const Matrix& targets) {
 	int correct_predictions = 0;
 
 	for (int i = 0; i < m; i++) {
-
-
-
-
-
+		// Convert sigmoid output to binary prediction (threshold at 0.5)
+		float predicted_value = predictions[i] > 0.5 ? 1.0f : 0.0f;
+		// Compare with target value
+		if (predicted_value == targets[i]) {
+			correct_predictions++;
+		}
 	}
 
 	return static_cast<float>(correct_predictions) / m;
