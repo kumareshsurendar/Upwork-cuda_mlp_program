@@ -1,53 +1,54 @@
-#include "neural_network.h"
-#include "nn_utils/nn_exception.h"
+// === Neural Network Kernel Implementations ===
 
-NeuralNetwork::NeuralNetwork(float learning_rate) :
-    learning_rate(learning_rate), bce_cost()
-{
-    // Initialize Y and dY without allocating memory yet
-    Y = Matrix();
-    dY = Matrix();
-}
+#include <cmath>
+#include <vector>
 
-NeuralNetwork::~NeuralNetwork() {
-    for (auto layer : layers) {
-        delete layer;
+// ReLUActivation forward kernel
+__global__ void reluForward(float *input, float *output, int size) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < size) {
+        output[idx] = fmaxf(0.0f, input[idx]);
     }
 }
 
-void NeuralNetwork::addLayer(NNLayer* layer) {
-    this->layers.push_back(layer);
-}
-
-// Task: Call forward on each layer
-Matrix NeuralNetwork::forward(Matrix X)
-{
-    Matrix Z = X;
-
-    for (auto layer : layers)
-    {
-        Z = layer->forward(Z);
+// ReLUActivation backward kernel
+__global__ void reluBackward(float *input, float *gradOutput, float *gradInput, int size) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < size) {
+        gradInput[idx] = input[idx] > 0 ? gradOutput[idx] : 0.0f;
     }
-
-    Y = Z;
-    
-    return Y;
 }
 
-// Task: Apply backpropagation
-void NeuralNetwork::backprop(Matrix predictions, Matrix target)
-{
-    dY.allocateMemoryIfNotAllocated(predictions.shape);
-    Matrix error = bce_cost.dCost(predictions, target, dY);
-
-    for (auto it = this->layers.rbegin(); it != this->layers.rend(); it++)
-    {
-        error = (*it)->backprop(error, learning_rate);
+// SigmoidActivation backward kernel
+__global__ void sigmoidBackward(float *output, float *gradOutput, float *gradInput, int size) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < size) {
+        float sigmoid_val = output[idx];
+        gradInput[idx] = gradOutput[idx] * sigmoid_val * (1.0f - sigmoid_val);
     }
-
-    cudaDeviceSynchronize();
 }
 
-std::vector<NNLayer*> NeuralNetwork::getLayers() const {
-    return layers;
+// LinearLayer forward kernel
+__global__ void linearForward(float *input, float *weights, float *bias, float *output, int inputSize, int outputSize) {
+    int row = blockIdx.x * blockDim.x + threadIdx.x;
+    if (row < outputSize) {
+        float sum = 0.0f;
+        for (int col = 0; col < inputSize; col++) {
+            sum += weights[row * inputSize + col] * input[col];
+        }
+        output[row] = sum + bias[row];
+    }
+}
+
+// computeAccuracy function (usually in main.cpp)
+float computeAccuracy(const std::vector<float>& predictions, const std::vector<float>& targets) {
+    int correct = 0;
+    int total = predictions.size();
+    for (int i = 0; i < total; ++i) {
+        int pred_label = predictions[i] >= 0.5f ? 1 : 0;
+        if (pred_label == static_cast<int>(targets[i])) {
+            correct++;
+        }
+    }
+    return static_cast<float>(correct) / total;
 }
