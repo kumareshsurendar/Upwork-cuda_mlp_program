@@ -8,7 +8,14 @@ set(CMAKE_CUDA_SEPARABLE_COMPILATION ON)
 
 message(${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
 
-include_directories(${PROJECT_SOURCE_DIR} ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
+include_directories(
+    ${PROJECT_SOURCE_DIR}/nn_utils
+    ${PROJECT_SOURCE_DIR}/layers
+    ${PROJECT_SOURCE_DIR}/core
+    ${PROJECT_SOURCE_DIR}  # this is optional if you include headers at root
+    ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES}
+)
+
 
 add_executable(${CMAKE_PROJECT_NAME}
 	           main.cu
