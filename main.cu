@@ -1,72 +1,83 @@
 #include <iostream>
-#include <time.h>
-
-#include "neural_network.h"
-#include "layers/linear_layer.h"
-#include "layers/relu_activation.h"
-#include "layers/sigmoid_activation.h"
-#include "nn_utils/nn_exception.h"
-#include "nn_utils/bce_cost.h"
-
+#include <vector>
+#include <cuda_runtime.h>
 #include "coordinates_dataset.h"
+#include "bce_cost.h"
+#include "matrix.h"
 
-float computeAccuracy(const Matrix& predictions, const Matrix& targets);
+// Forward declarations of kernels
+__global__ void reluForward(float *input, float *output, int size);
+__global__ void sigmoidBackward(float *output, float *gradOutput, float *gradInput, int size);
+__global__ void linearForward(float *input, float *weights, float *bias, float *output, int inputSize, int outputSize);
 
-int main() {
 
-	srand( time(NULL) );
-
-	CoordinatesDataset dataset(100, 21);
-	BCECost bce_cost;
-
-	NeuralNetwork nn;
-	nn.addLayer(new LinearLayer("linear_1", Shape(2, 30)));
-	nn.addLayer(new ReLUActivation("relu_1"));
-	nn.addLayer(new LinearLayer("linear_2", Shape(30, 1)));
-	nn.addLayer(new SigmoidActivation("sigmoid_output"));
-
-	// network training
-	Matrix Y;
-	for (int epoch = 0; epoch < 1001; epoch++) {
-		float cost = 0.0;
-
-		for (int batch = 0; batch < dataset.getNumOfBatches() - 1; batch++) {
-			Y = nn.forward(dataset.getBatches().at(batch));
-			nn.backprop(Y, dataset.getTargets().at(batch));
-			cost += bce_cost.cost(Y, dataset.getTargets().at(batch));
-		}
-
-		if (epoch % 100 == 0) {
-			std::cout 	<< "Epoch: " << epoch
-						<< ", Cost: " << cost / dataset.getNumOfBatches()
-						<< std::endl;
-		}
-	}
-
-	// compute accuracy
-	Y = nn.forward(dataset.getBatches().at(dataset.getNumOfBatches() - 1));
-	Y.copyDeviceToHost();
-
-	float accuracy = computeAccuracy(
-			Y, dataset.getTargets().at(dataset.getNumOfBatches() - 1));
-	std::cout 	<< "Accuracy: " << accuracy << std::endl;
-
-	return 0;
+float computeAccuracy(float* predictions, float* targets, int count) {
+    int correct = 0;
+    for (int i = 0; i < count; ++i) {
+        int pred_label = predictions[i] >= 0.5f ? 1 : 0;
+        if (pred_label == static_cast<int>(targets[i])) {
+            correct++;
+        }
+    }
+    return static_cast<float>(correct) / count;
 }
 
-//Task: Calculate the accuracy of the predictions.
-float computeAccuracy(const Matrix& predictions, const Matrix& targets) {
-	int m = predictions.shape.x;
-	int correct_predictions = 0;
+int main() {
+    srand(time(NULL));
 
-	for (int i = 0; i < m; i++) {
-		// Convert sigmoid output to binary prediction (threshold at 0.5)
-		float predicted_value = predictions[i] > 0.5 ? 1.0f : 0.0f;
-		// Compare with target value
-		if (predicted_value == targets[i]) {
-			correct_predictions++;
-		}
-	}
+    const int samples = 1024;
+    const int inputSize = 2;
+    const int hiddenSize = 4;
+    const int outputSize = 1;
 
-	return static_cast<float>(correct_predictions) / m;
+    CoordinatesDataset dataset(samples, 1);
+    Matrix& inputMatrix = dataset.getBatches()[0];
+    Matrix& targetMatrix = dataset.getTargets()[0];
+    inputMatrix.copyDeviceToHost();
+    targetMatrix.copyDeviceToHost();
+
+    float* hostInput = inputMatrix.data_host.get();
+    float* hostLabels = targetMatrix.data_host.get();
+
+    float *d_input, *d_hidden, *d_output, *d_weights1, *d_bias1, *d_weights2, *d_bias2;
+    cudaMalloc(&d_input, samples * inputSize * sizeof(float));
+    cudaMalloc(&d_hidden, samples * hiddenSize * sizeof(float));
+    cudaMalloc(&d_output, samples * outputSize * sizeof(float));
+    cudaMalloc(&d_weights1, hiddenSize * inputSize * sizeof(float));
+    cudaMalloc(&d_bias1, hiddenSize * sizeof(float));
+    cudaMalloc(&d_weights2, outputSize * hiddenSize * sizeof(float));
+    cudaMalloc(&d_bias2, outputSize * sizeof(float));
+
+    cudaMemset(d_weights1, 0, hiddenSize * inputSize * sizeof(float));
+    cudaMemset(d_bias1, 0, hiddenSize * sizeof(float));
+    cudaMemset(d_weights2, 0, outputSize * hiddenSize * sizeof(float));
+    cudaMemset(d_bias2, 0, outputSize * sizeof(float));
+
+    cudaMemcpy(d_input, hostInput, samples * inputSize * sizeof(float), cudaMemcpyHostToDevice);
+
+    for (int i = 0; i < samples; ++i) {
+        float* sampleInput = d_input + i * inputSize;
+        float* sampleHidden = d_hidden + i * hiddenSize;
+        float* sampleOutput = d_output + i * outputSize;
+
+        linearForward<<<1, hiddenSize>>>(sampleInput, d_weights1, d_bias1, sampleHidden, inputSize, hiddenSize);
+        reluForward<<<1, hiddenSize>>>(sampleHidden, sampleHidden, hiddenSize);
+        linearForward<<<1, outputSize>>>(sampleHidden, d_weights2, d_bias2, sampleOutput, hiddenSize, outputSize);
+    }
+
+    std::vector<float> predictions(samples);
+    cudaMemcpy(predictions.data(), d_output, samples * sizeof(float), cudaMemcpyDeviceToHost);
+
+    float accuracy = computeAccuracy(predictions.data(), hostLabels, samples);
+    std::cout << "Network accuracy: " << accuracy << std::endl;
+
+    cudaFree(d_input);
+    cudaFree(d_hidden);
+    cudaFree(d_output);
+    cudaFree(d_weights1);
+    cudaFree(d_bias1);
+    cudaFree(d_weights2);
+    cudaFree(d_bias2);
+
+    return 0;
 }
